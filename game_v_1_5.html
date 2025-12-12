@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Neon Pulse Platformer</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #050505;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+            font-family: 'Courier New', Courier, monospace;
+        }
+        canvas {
+            box-shadow: 0 0 80px rgba(0, 255, 255, 0.2);
+            border: 2px solid #333;
+        }
+        #ui {
+            position: absolute;
+            top: 20px;
+            color: rgba(255, 255, 255, 0.7);
+            text-align: center;
+            pointer-events: none;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            z-index: 10;
+        }
+        .controls {
+            font-size: 12px;
+            margin-top: 5px;
+            color: #555;
+        }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <h1 id="title">NEON PULSE</h1>
+    <div class="controls">Press Space or Enter to Start</div>
+</div>
+
+<canvas id="gameCanvas" width="800" height="600"></canvas>
+
+<script>
+/**
+ * NEON PULSE ENGINE
+ * FIX: Corrected Player Spawn Points
+ * ADDED: Level 4
+ */
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// --- GAME CONFIG ---
+const CONFIG = {
+    gravity: 0.6,
+    friction: 0.82,
+    speed: 7,
+    jumpForce: -14,
+    doubleJumpForce: -12,
+    colors: {
+        bg: '#050505',
+        player: '#00f3ff', // Cyan
+        wall: '#bc13fe',   // Purple
+        lava: '#ff073a',   // Red
+        goal: '#ffe808'    // Yellow
+    }
+};
+
+// --- GAME STATE ---
+let shake = 0;
+let particles = [];
+let gameActive = false;
+let gameState = 'MENU'; // Possible states: 'MENU', 'PLAYING', 'DEAD', 'WIN'
+let currentLevelIndex = 0;
+let currentMap = [];
+
+const player = {
+    x: 100, y: 400, w: 24, h: 24,
+    vx: 0, vy: 0,
+    canJump: false,
+    jumpCount: 0,
+    maxJumps: 2,
+    scaleX: 1, scaleY: 1,
+    dead: false
+};
+
+// --- MAP DATA (Array of Levels) ---
+// Type: 1=Wall, 2=Lava, 3=Goal
+const levels = [
+    // Level 1: Intro/Tutorial (Original Map)
+    {
+        start: {x: 100, y: 400}, // SAFE START LOCATION!
+        blocks: [
+            // Borders
+            {x: 0, y: 580, w: 800, h: 20, type: 1}, // Main Floor Border
+            {x: 0, y: 0, w: 20, h: 600, type: 1},
+            {x: 780, y: 0, w: 20, h: 600, type: 1},
+            {x: 0, y: 0, w: 800, h: 20, type: 1},
+
+            // Platforms
+            {x: 0, y: 500, w: 200, h: 20, type: 1}, // Start Platform
+            {x: 250, y: 450, w: 150, h: 20, type: 1},
+            {x: 500, y: 380, w: 100, h: 20, type: 1},
+            {x: 150, y: 300, w: 200, h: 20, type: 1},
+            {x: 500, y: 220, w: 20, h: 100, type: 1}, // Wall jump obstacle
+            {x: 650, y: 250, w: 100, h: 20, type: 1},
+            
+            // Hazards (Lava)
+            {x: 200, y: 560, w: 580, h: 20, type: 2}, // Floor lava
+            {x: 300, y: 150, w: 20, h: 20, type: 2},  // Floating hazard
+            {x: 400, y: 100, w: 20, h: 20, type: 2},
+
+            // Goal
+            {x: 700, y: 200, w: 30, h: 30, type: 3} 
+        ]
+    },
+
+    // Level 2: Double Jump Challenge
+    {
+        start: {x: 50, y: 400},
+        blocks: [
+            {x: 0, y: 580, w: 800, h: 20, type: 1},
+            {x: 0, y: 0, w: 20, h: 600, type: 1},
+            {x: 780, y: 0, w: 20, h: 600, type: 1},
+            {x: 0, y: 0, w: 800, h: 20, type: 1},
+            
+            {x: 20, y: 500, w: 100, h: 20, type: 1}, // Start platform
+            {x: 200, y: 450, w: 50, h: 20, type: 1},
+            {x: 350, y: 400, w: 50, h: 20, type: 1},
+            {x: 500, y: 350, w: 50, h: 20, type: 1},
+            {x: 650, y: 300, w: 100, h: 20, type: 1}, // Platform near goal
+            
+            {x: 120, y: 560, w: 660, h: 20, type: 2}, // Large lava pool
+            {x: 700, y: 240, w: 30, h: 30, type: 3} // Goal
+        ]
+    },
+
+    // Level 3: Narrow Jumps
+    {
+        start: {x: 50, y: 400},
+        blocks: [
+            {x: 0, y: 580, w: 800, h: 20, type: 1},
+            {x: 0, y: 0, w: 20, h: 600, type: 1},
+            {x: 780, y: 0, w: 20, h: 600, type: 1},
+            {x: 0, y: 0, w: 800, h: 20, type: 1},
+
+            {x: 20, y: 500, w: 100, h: 20, type: 1}, // Start platform
+            {x: 200, y: 400, w: 50, h: 20, type: 1},
+            {x: 350, y: 300, w: 50, h: 20, type: 1},
+            {x: 500, y: 200, w: 50, h: 20, type: 1},
+            {x: 650, y: 150, w: 100, h: 20, type: 1},
+            
+            {x: 120, y: 560, w: 660, h: 20, type: 2}, // Lava
+            {x: 700, y: 90, w: 30, h: 30, type: 3} // Goal
+        ]
+    },
+    
+    // Level 4: Lava Climb (NEW)
+    {
+        start: {x: 50, y: 550},
+        blocks: [
+            {x: 0, y: 580, w: 800, h: 20, type: 2}, // Entire floor is lava
+            {x: 0, y: 0, w: 20, h: 600, type: 1},
+            {x: 780, y: 0, w: 20, h: 600, type: 1},
+            {x: 0, y: 0, w: 800, h: 20, type: 1},
+
+            // Starting island
+            {x: 40, y: 550, w: 100, h: 30, type: 1},
+
+            // Climbing islands (requires double jump)
+            {x: 200, y: 480, w: 50, h: 20, type: 1},
+            {x: 350, y: 400, w: 50, h: 20, type: 1},
+            {x: 550, y: 300, w: 50, h: 20, type: 1},
+            {x: 700, y: 200, w: 50, h: 20, type: 1},
+
+            // Final gap jump
+            {x: 650, y: 50, w: 100, h: 30, type: 1},
+            {x: 70, y: 50, w: 30, h: 30, type: 3} // Goal is high left
+        ]
+    }
+];
+
+// --- LEVEL MANAGEMENT ---
+
+function loadLevel(index) {
+    if (index >= levels.length) {
+        winGame(true); // Player completed all levels!
+        return;
+    }
+
+    currentLevelIndex = index;
+    const levelData = levels[index];
+    currentMap = levelData.blocks;
+
+    // FIX: Use explicit start position from level data
+    player.x = levelData.start.x;
+    player.y = levelData.start.y - player.h; // Spawn height adjusted to stand on platform
+
+    player.vx = 0; player.vy = 0;
+    player.dead = false;
+    player.jumpCount = 0;
+    shake = 0;
+    gameActive = true;
+    gameState = 'PLAYING';
+    document.getElementById('title').innerText = `LEVEL ${index + 1} / ${levels.length}`;
+    document.getElementById('title').style.color = CONFIG.colors.player;
+    document.querySelector('.controls').innerHTML = "Arrows/WASD to Move • Space to Double Jump";
+}
+
+function resetGame() {
+    // Reload the current level
+    loadLevel(currentLevelIndex);
+}
+
+function startNewGame() {
+    currentLevelIndex = 0;
+    loadLevel(currentLevelIndex);
+}
+
+// --- CONTROLS ---
+const keys = {};
+
+document.addEventListener('keydown', (e) => {
+    // Prevent scrolling
+    if(["Space","ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].indexOf(e.code) > -1) {
+        e.preventDefault();
+    }
+    
+    keys[e.code] = true;
+
+    if (gameState === 'MENU' && (e.code === 'Space' || e.code === 'Enter')) {
+        startNewGame();
+    } else if (gameState === 'DEAD' && e.code === 'KeyR') {
+        resetGame();
+    } else if (gameState === 'WIN' && e.code === 'KeyR') {
+        // If player finished all levels, go back to menu, otherwise load next
+        if (currentLevelIndex >= levels.length) {
+            gameState = 'MENU';
+            document.getElementById('title').innerText = "NEON PULSE";
+            document.querySelector('.controls').innerHTML = "Press Space or Enter to Start";
+        } else {
+            loadLevel(currentLevelIndex);
+        }
+    }
+
+    // Jump Logic (Only allow jumping while playing)
+    if (gameState === 'PLAYING' && (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW')) {
+        if (player.canJump) {
+            // First Jump
+            player.vy = CONFIG.jumpForce;
+            player.canJump = false;
+            player.jumpCount = 1;
+            squash(0.6, 1.4);
+            spawnParticles(player.x + player.w/2, player.y + player.h, CONFIG.colors.player, 5);
+        } else if (player.jumpCount < player.maxJumps) {
+            // Double Jump
+            player.vy = CONFIG.doubleJumpForce;
+            player.jumpCount++;
+            squash(0.7, 1.3);
+            spawnParticles(player.x + player.w/2, player.y + player.h, '#ffffff', 8);
+        }
+    }
+});
+
+document.addEventListener('keyup', (e) => keys[e.code] = false);
+
+// --- PHYSICS ENGINE ---
+
+function squash(x, y) {
+    player.scaleX = x;
+    player.scaleY = y;
+}
+
+function spawnParticles(x, y, color, count) {
+    for (let i = 0; i < count; i++) {
+        particles.push({
+            x: x, y: y,
+            vx: (Math.random() - 0.5) * 8,
+            vy: (Math.random() - 0.5) * 8,
+            life: 1.0,
+            color: color
+        });
+    }
+}
+
+function checkRect(r1, r2) {
+    return (r1.x < r2.x + r2.w && r1.x + r1.w > r2.x &&
+            r1.y < r2.y + r2.h && r1.y + r1.h > r2.y);
+}
+
+
+function update() {
+    if (gameState !== 'PLAYING') {
+        // Only decay shake and particles outside of PLAYING state
+        if (shake > 0) shake *= 0.9;
+        if (shake < 0.5) shake = 0;
+        return;
+    }
+
+    // Screen Shake Decay
+    if (shake > 0) shake *= 0.9;
+    if (shake < 0.5) shake = 0;
+
+    // Squash & Stretch restoration (Lerp back to 1)
+    player.scaleX += (1 - player.scaleX) * 0.1;
+    player.scaleY += (1 - player.scaleY) * 0.1;
+
+    if (player.dead) return;
+
+    // Horizontal Movement
+    if (keys['ArrowRight'] || keys['KeyD']) {
+        if (player.vx < CONFIG.speed) player.vx++;
+    } 
+    else if (keys['ArrowLeft'] || keys['KeyA']) {
+        if (player.vx > -CONFIG.speed) player.vx--;
+    } 
+    else {
+        player.vx *= CONFIG.friction;
+    }
+
+    player.x += player.vx;
+
+    // X Collisions
+    for (let b of currentMap) {
+        if (b.type === 1 && checkRect(player, b)) {
+            if (player.vx > 0) player.x = b.x - player.w;
+            else if (player.vx < 0) player.x = b.x + b.w;
+            player.vx = 0;
+        } else if (b.type === 2 && checkRect(player, b)) {
+            die();
+        } else if (b.type === 3 && checkRect(player, b)) {
+            advanceLevel();
+        }
+    }
+
+    // Vertical Movement
+    player.vy += CONFIG.gravity;
+    player.y += player.vy;
+    
+    player.canJump = false; // Assume in air
+
+    // Y Collisions
+    for (let b of currentMap) {
+        if (checkRect(player, b)) {
+            if (b.type === 2) { die(); return; }
+            if (b.type === 3) { advanceLevel(); return; }
+
+            // Hitting Floor
+            if (player.vy > 0) {
+                player.y = b.y - player.h;
+                player.vy = 0;
+                player.canJump = true;
+                player.jumpCount = 0;
+                // Landing impact squash
+                if (player.vy > 10) squash(1.4, 0.6); 
+            }
+            // Hitting Ceiling
+            else if (player.vy < 0) {
+                player.y = b.y + b.h;
+                player.vy = 0;
+            }
+        }
+    }
+
+    // Bounds Check
+    if (player.y > 600) die();
+}
+
+function advanceLevel() {
+    if (gameState !== 'PLAYING') return;
+    
+    // Increment level index and try to load the next level
+    currentLevelIndex++;
+    
+    if (currentLevelIndex < levels.length) {
+        winGame(false); // Win current level, prepare for next
+    } else {
+        winGame(true); // Completed final level!
+    }
+}
+
+function die() {
+    if (gameState !== 'PLAYING') return;
+    gameState = 'DEAD';
+    player.dead = true;
+    shake = 20;
+    spawnParticles(player.x, player.y, CONFIG.colors.player, 50);
+    document.getElementById('title').innerText = "FATAL ERROR. PRESS R.";
+    document.getElementById('title').style.color = "red";
+    document.querySelector('.controls').innerHTML = "Press R to Restart Level";
+}
+
+function winGame(finalWin) {
+    if (gameState !== 'PLAYING') return;
+    gameState = 'WIN';
+    player.dead = true; 
+    shake = 10;
+    spawnParticles(player.x, player.y, CONFIG.colors.goal, 50);
+
+    if (finalWin) {
+        document.getElementById('title').innerText = "ALL SYSTEMS ONLINE. PRESS R TO REBOOT.";
+        document.getElementById('title').style.color = CONFIG.colors.goal;
+        document.querySelector('.controls').innerHTML = "Press R to Return to Menu";
+    } else {
+        document.getElementById('title').innerText = `LEVEL ${currentLevelIndex} CLEARED. PRESS R FOR LEVEL ${currentLevelIndex + 1}`;
+        document.getElementById('title').style.color = CONFIG.colors.goal;
+        document.querySelector('.controls').innerHTML = "Press R to Continue";
+    }
+}
+
+// --- RENDER ENGINE ---
+
+function drawGrid() {
+    ctx.strokeStyle = '#111';
+    ctx.lineWidth = 1;
+    for(let i=0; i<800; i+=40) {
+        ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,600); ctx.stroke();
+    }
+    for(let i=0; i<600; i+=40) {
+        ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(800,i); ctx.stroke();
+    }
+}
+
+function drawMenu() {
+    ctx.fillStyle = CONFIG.colors.bg;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    drawGrid();
+
+    ctx.shadowBlur = 40;
+    ctx.shadowColor = CONFIG.colors.player;
+    ctx.font = '60px "Courier New"';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = CONFIG.colors.player;
+    ctx.fillText("NEON PULSE", canvas.width / 2, canvas.height / 2 - 50);
+    
+    ctx.shadowBlur = 10;
+    ctx.shadowColor = 'white';
+    ctx.font = '20px "Courier New"';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+    ctx.fillText("PRESS SPACE OR ENTER TO START", canvas.width / 2, canvas.height / 2 + 50);
+    
+    ctx.shadowBlur = 0;
+}
+
+function drawGame() {
+    // 1. Clear & Shake
+    ctx.save();
+    let dx = (Math.random() - 0.5) * shake;
+    let dy = (Math.random() - 0.5) * shake;
+    ctx.translate(dx, dy);
+
+    // Background
+    ctx.fillStyle = CONFIG.colors.bg;
+    ctx.fillRect(-50, -50, canvas.width+100, canvas.height+100);
+    drawGrid();
+
+    // 2. Map
+    currentMap.forEach(b => {
+        ctx.shadowBlur = 15;
+        if (b.type === 1) { // Wall
+            ctx.strokeStyle = CONFIG.colors.wall;
+            ctx.shadowColor = CONFIG.colors.wall;
+            ctx.lineWidth = 2;
+            ctx.strokeRect(b.x, b.y, b.w, b.h);
+        } else if (b.type === 2) { // Lava
+            ctx.fillStyle = CONFIG.colors.lava;
+            ctx.shadowColor = CONFIG.colors.lava;
+            ctx.fillRect(b.x, b.y + 5, b.w, b.h - 5);
+        } else if (b.type === 3) { // Goal
+            ctx.fillStyle = CONFIG.colors.goal;
+            ctx.shadowColor = CONFIG.colors.goal;
+            ctx.fillRect(b.x, b.y, b.w, b.h);
+            // Inner white core
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(b.x + 10, b.y + 10, b.w - 20, b.h - 20);
+        }
+        ctx.shadowBlur = 0;
+    });
+
+    // 3. Particles
+    for (let i = particles.length - 1; i >= 0; i--) {
+        let p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life -= 0.03;
+        
+        ctx.globalAlpha = p.life;
+        ctx.fillStyle = p.color;
+        ctx.fillRect(p.x, p.y, 4, 4);
+        ctx.globalAlpha = 1;
+
+        if (p.life <= 0) particles.splice(i, 1);
+    }
+
+    // 4. Player
+    if (!player.dead) {
+        // Calculate center for scaling
+        let cx = player.x + player.w/2;
+        let cy = player.y + player.h; // Pivot at bottom
+
+        ctx.translate(cx, cy);
+        ctx.scale(player.scaleX, player.scaleY);
+        ctx.translate(-cx, -cy);
+
+        ctx.shadowBlur = 20;
+        ctx.shadowColor = CONFIG.colors.player;
+        ctx.fillStyle = CONFIG.colors.player;
+        ctx.fillRect(player.x, player.y, player.w, player.h);
+        
+        // Inner light
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(player.x+6, player.y+6, player.w-12, player.h-12);
+        
+        ctx.shadowBlur = 0;
+        
+        // Reset transform
+        ctx.setTransform(1, 0, 0, 1, 0, 0); 
+    }
+    
+    // Re-apply shake for final effects (if player was drawn, this handles cleanup)
+    ctx.translate(dx, dy);
+
+    // 5. Scanline Effect (Retro TV)
+    ctx.setTransform(1, 0, 0, 1, 0, 0); // Absolute reset for scanlines
+    ctx.fillStyle = "rgba(0, 0, 0, 0.1)";
+    for (let i = 0; i < canvas.height; i += 4) {
+        ctx.fillRect(0, i, canvas.width, 2);
+    }
+
+    ctx.restore();
+}
+
+function draw() {
+    if (gameState === 'MENU') {
+        drawMenu();
+    } else {
+        drawGame();
+    }
+}
+
+// --- LOOP ---
+function loop() {
+    update();
+    draw();
+    requestAnimationFrame(loop);
+}
+
+// Ensure the controls text starts correctly for the menu
+document.querySelector('.controls').innerHTML = "Press Space or Enter to Start";
+
+loop();
+
+</script>
+</body>
+</html>
