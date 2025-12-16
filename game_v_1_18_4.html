@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Neon Pulse: Overdrive</title>
+    <style>
+        body { margin: 0; background-color: #05050a; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; font-family: 'Courier New', monospace; }
+        canvas { box-shadow: 0 0 100px rgba(255, 0, 255, 0.2); border: 1px solid #1a1a2e; }
+        #ui { position: absolute; top: 20px; color: #00ffff; text-shadow: 0 0 10px #00ffff; text-align: center; width: 800px; pointer-events: none; text-transform: uppercase; letter-spacing: 4px; z-index: 10; }
+        #stats { position: absolute; bottom: 20px; left: 20px; color: #ff00ff; font-size: 14px; }
+    </style>
+</head>
+<body>
+<div id="ui">
+    <div id="death-counter">REBOOTS: 0</div>
+    <div id="timer" style="display:none">TIME: 0.00s</div>
+</div>
+<div id="stats">MODE: NORMAL</div>
+<canvas id="gameCanvas" width="800" height="600"></canvas>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    const CONFIG = {
+        gravity: 0.6, 
+        friction: 0.82, 
+        speed: 7, 
+        jumpForce: -14,
+        colors: {
+            bg: '#05050a', sunTop: '#ff00ff', sunBottom: '#ff8800',
+            player: '#00ffff', platform: '#bc13fe', hazard: '#ff073a', goal: '#ffe808'
+        }
+    };
+
+    let gameState = 'MENU';
+    let gameMode = 'NORMAL';
+    let currentLevelIndex = 0;
+    let menuSelection = 0;
+    let frame = 0;
+    let startTime = 0;
+    let finalTime = 0;
+
+    const player = {
+        x: 100, y: 500, w: 20, h: 20, vx: 0, vy: 0,
+        deaths: 0, onGround: false, canDoubleJump: true
+    };
+
+    // --- LEVEL DATA (Generates 30 levels with increasing difficulty) ---
+    const levels = [];
+    for (let i = 0; i < 30; i++) {
+        let platformCount = 5 + Math.floor(i / 3);
+        let blocks = [[0, 580, 800, 20, 'platform']]; // Ground
+        for (let j = 0; j < platformCount; j++) {
+            blocks.push([
+                100 + (j * 120), 
+                500 - (j * 60) + (Math.random() * 40), 
+                80 + (Math.random() * 40), 20, 'platform'
+            ]);
+        }
+        // Add Goal
+        blocks.push([700, 100, 40, 40, 'goal']);
+        // Add Hazards after level 5
+        if (i > 5) {
+            blocks.push([300 + (Math.random() * 200), 560, 100, 20, 'hazard']);
+        }
+        levels.push(blocks);
+    }
+
+    // --- INPUTS ---
+    const keys = {};
+    window.onkeydown = e => {
+        keys[e.key] = true;
+        if (gameState === 'MENU') {
+            if (e.key === 'ArrowUp') menuSelection = (menuSelection - 1 + 3) % 3;
+            if (e.key === 'ArrowDown') menuSelection = (menuSelection + 1) % 3;
+            if (e.key === ' ') startGame();
+        }
+    };
+    window.onkeyup = e => keys[e.key] = false;
+
+    function startGame() {
+        const modes = ['NORMAL', 'HARD', 'SPEEDRUN'];
+        gameMode = modes[menuSelection];
+        gameState = 'PLAYING';
+        currentLevelIndex = 0;
+        player.deaths = 0;
+        startTime = Date.now();
+        resetPlayer();
+        
+        document.getElementById('stats').innerText = `MODE: ${gameMode}`;
+        document.getElementById('timer').style.display = gameMode === 'SPEEDRUN' ? 'block' : 'none';
+    }
+
+    function resetPlayer() {
+        player.x = 100; player.y = 500;
+        player.vx = 0; player.vy = 0;
+    }
+
+    // --- MAIN ENGINE ---
+    function update() {
+        if (gameState !== 'PLAYING') return;
+
+        if (keys['ArrowLeft'] || keys['a']) player.vx -= 0.8;
+        if (keys['ArrowRight'] || keys['d']) player.vx += 0.8;
+        if ((keys['ArrowUp'] || keys['w'] || keys[' ']) && player.onGround) {
+            player.vy = CONFIG.jumpForce;
+            player.onGround = false;
+        }
+
+        player.vx *= CONFIG.friction;
+        player.vy += (gameMode === 'HARD' ? CONFIG.gravity * 1.3 : CONFIG.gravity);
+        
+        player.x += player.vx;
+        player.y += player.vy;
+
+        // Collision & Level Logic
+        player.onGround = false;
+        levels[currentLevelIndex].forEach(b => {
+            if (player.x < b[0] + b[2] && player.x + player.w > b[0] &&
+                player.y < b[1] + b[3] && player.y + player.h > b[1]) {
+                
+                if (b[4] === 'hazard') { player.deaths++; resetPlayer(); }
+                if (b[4] === 'goal') { 
+                    currentLevelIndex++; 
+                    if (currentLevelIndex >= 30) {
+                        finalTime = (Date.now() - startTime) / 1000;
+                        gameState = 'MENU';
+                    } else {
+                        resetPlayer();
+                    }
+                }
+                if (b[4] === 'platform') {
+                    if (player.vy > 0) { player.y = b[1] - player.h; player.vy = 0; player.onGround = true; }
+                    else if (player.vy < 0) { player.y = b[1] + b[3]; player.vy = 0; }
+                }
+            }
+        });
+
+        if (player.y > 600) { player.deaths++; resetPlayer(); }
+        
+        if (gameMode === 'SPEEDRUN') {
+            document.getElementById('timer').innerText = `TIME: ${((Date.now() - startTime) / 1000).toFixed(2)}s`;
+        }
+        document.getElementById('death-counter').innerText = `REBOOTS: ${player.deaths}`;
+    }
+
+    function draw() {
+        update();
+        ctx.fillStyle = CONFIG.colors.bg;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        if (gameState === 'MENU') {
+            drawMenu();
+        } else {
+            // Draw Level
+            levels[currentLevelIndex].forEach(b => {
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = CONFIG.colors[b[4]];
+                ctx.fillStyle = CONFIG.colors[b[4]];
+                ctx.fillRect(b[0], b[1], b[2], b[3]);
+            });
+            // Draw Player
+            ctx.shadowBlur = 20; ctx.shadowColor = CONFIG.colors.player;
+            ctx.fillStyle = CONFIG.colors.player;
+            ctx.fillRect(player.x, player.y, player.w, player.h);
+        }
+        frame++;
+        requestAnimationFrame(draw);
+    }
+
+    function drawMenu() {
+        // Draw Retro Sun
+        const grad = ctx.createLinearGradient(400, 100, 400, 350);
+        grad.addColorStop(0, CONFIG.colors.sunTop);
+        grad.addColorStop(1, CONFIG.colors.sunBottom);
+        ctx.fillStyle = grad;
+        ctx.beginPath(); ctx.arc(400, 250, 100, 0, Math.PI * 2); ctx.fill();
+
+        ctx.font = "bold 50px Courier"; ctx.textAlign = "center";
+        ctx.fillStyle = "white"; ctx.shadowBlur = 20; ctx.shadowColor = "#00ffff";
+        ctx.fillText("NEON PULSE", 400, 150);
+
+        const options = ["NORMAL MODE", "HARD MODE", "SPEEDRUN"];
+        ctx.font = "20px Courier";
+        options.forEach((opt, i) => {
+            ctx.fillStyle = i === menuSelection ? "#00ffff" : "#555";
+            ctx.fillText(i === menuSelection ? `> ${opt} <` : opt, 400, 400 + i * 40);
+        });
+
+        if (finalTime > 0) {
+            ctx.fillStyle = "#ffe808";
+            ctx.fillText(`LAST RUN: ${finalTime.toFixed(2)}s`, 400, 550);
+        }
+    }
+
+    draw();
+</script>
+</body>
+</html>
