@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Neon Pulse Platformer</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #050505;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+            font-family: 'Courier New', Courier, monospace;
+        }
+        canvas {
+            box-shadow: 0 0 80px rgba(0, 255, 255, 0.2);
+            border: 2px solid #333;
+        }
+        #ui {
+            position: absolute;
+            top: 20px;
+            color: rgba(255, 255, 255, 0.7);
+            text-align: center;
+            pointer-events: none;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            z-index: 10;
+            width: 800px;
+        }
+        #death-counter {
+            position: absolute;
+            top: 20px;
+            left: 0;
+            color: #ff073a;
+            font-size: 16px;
+            padding-left: 20px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <div id="death-counter">TOTAL DEATHS: 0</div>
+</div>
+
+<canvas id="gameCanvas" width="800" height="600"></canvas>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // --- GAME CONFIGURATION AND CONSTANTS ---
+    const TILE_SIZE = 40;
+
+    const CONFIG = {
+        // Updated Menu Options - "LEVEL EDITOR" is now included
+        menu: {
+            MAIN_OPTIONS: ["PLAY GAME", "LEVEL EDITOR", "OPTIONS", "EXIT"],
+            currentSelection: 0
+        },
+        physics: {
+            gravity: 0.8,
+            friction: 0.85,
+            maxFallSpeed: 10
+        },
+        colors: {
+            player: '#00FFFF',
+            platform: '#FFFFFF',
+            goal: '#00FF00',
+            hazard: '#FF0000',
+            background: '#050505',
+            // New Asset Colors
+            dashBoost: '#FFA500', // Orange
+            antiGravity: '#8A2BE2', // BlueViolet
+            timedBlock: '#FFFF00', // Yellow
+            warpGate: '#FF69B4', // HotPink
+            toxicPool: '#00FF7F' // SpringGreen
+        },
+        // NEW: Asset Definitions for Level Editor
+        ASSETS: {
+            // Base types
+            START: 1,
+            PLATFORM: 2,
+            GOAL: 3,
+            HAZARD: 4,
+            // New Interactive Types (Assists/Mechanics)
+            DASH_BOOST: 5,
+            ANTI_GRAVITY_SPHERE: 6,
+            TIMED_BLOCK_ON: 7, 
+            TIMED_BLOCK_OFF: 8, 
+            WARP_GATE_A: 9,
+            WARP_GATE_B: 10,
+            TOXIC_POOL_SURFACE: 11
+        }
+    };
+
+    // --- GAME STATE AND PLAYER OBJECTS ---
+    let gameState = 'MENU';
+    let currentLevelIndex = 0;
+    let player = {
+        x: 0, y: 0, w: 20, h: 20, vx: 0, vy: 0,
+        onGround: false,
+        // menuState now includes 'LEVEL_EDITOR'
+        menuState: 'MAIN', // 'MAIN', 'LEVEL_SELECT', 'LEVEL_EDITOR', 'CONTROLS', 'OPTIONS'
+        deaths: 0,
+        sessionDeaths: 0,
+
+        // NEW: Player Assist States
+        isDashing: false,
+        dashTimer: 0,
+        antiGravityTimer: 0,
+        isAntiGravity: false,
+        teleportCooldown: 0
+    };
+    
+    // --- LEVEL DATA (First 10 levels included as base) ---
+    // The Level Editor will modify or save new levels in a structure like this.
+    let levels = [
+        // Level 1: The Foundations
+        [[0, 560, 800, 40, CONFIG.ASSETS.PLATFORM], [50, 500, 100, 20, CONFIG.ASSETS.PLATFORM], [700, 100, 20, 20, CONFIG.ASSETS.GOAL], [0, 530, 20, 20, CONFIG.ASSETS.START]],
+        // Level 2: Simple Jumps (Add 9 more placeholder levels here if needed for full count)
+        [[0, 560, 800, 40, CONFIG.ASSETS.PLATFORM], [200, 460, 100, 20, CONFIG.ASSETS.PLATFORM], [500, 360, 100, 20, CONFIG.ASSETS.PLATFORM], [700, 100, 20, 20, CONFIG.ASSETS.GOAL], [0, 530, 20, 20, CONFIG.ASSETS.START]],
+        // Placeholder Level 3
+        [[0, 560, 800, 40, CONFIG.ASSETS.PLATFORM], [200, 520, 100, 40, CONFIG.ASSETS.HAZARD], [700, 100, 20, 20, CONFIG.ASSETS.GOAL], [0, 530, 20, 20, CONFIG.ASSETS.START]],
+        // Placeholder Level 4
+        [[0, 560, 150, 40, CONFIG.ASSETS.PLATFORM], [300, 560, 150, 40, CONFIG.ASSETS.PLATFORM], [600, 560, 200, 40, CONFIG.ASSETS.PLATFORM], [700, 500, 20, 20, CONFIG.ASSETS.GOAL], [0, 530, 20, 20, CONFIG.ASSETS.START]],
+        // Placeholder Level 5
+        [[0, 560, 800, 40, CONFIG.ASSETS.PLATFORM], [100, 500, 40, 40, CONFIG.ASSETS.PLATFORM], [200, 440, 40, 40, CONFIG.ASSETS.PLATFORM], [300, 380, 40, 40, CONFIG.ASSETS.PLATFORM], [700, 100, 20, 20, CONFIG.ASSETS.GOAL], [0, 530, 20, 20, CONFIG.ASSETS.START]],
+        // Placeholder Level 6
+        [[0, 560, 150, 40, CONFIG.ASSETS.PLATFORM], [150, 560, 100, 40, CONFIG.ASSETS.HAZARD], [250, 560, 150, 40, CONFIG.ASSETS.PLATFORM], [700, 500, 20, 20, CONFIG.ASSETS.GOAL], [0, 530, 20, 20, CONFIG.ASSETS.START]],
+        // Placeholder Level 7
+        [[0, 560, 800, 40, CONFIG.ASSETS.PLATFORM], [100, 500, 100, 20, CONFIG.ASSETS.PLATFORM], [300, 400, 100, 20, CONFIG.ASSETS.PLATFORM], [500, 300, 100, 20, CONFIG.ASSETS.PLATFORM], [700, 100, 20, 20, CONFIG.ASSETS.GOAL], [0, 530, 20, 20, CONFIG.ASSETS.START]],
+        // Placeholder Level 8
+        [[0, 560, 800, 40, CONFIG.ASSETS.PLATFORM], [100, 520, 50, 40, CONFIG.ASSETS.HAZARD], [250, 520, 50, 40, CONFIG.ASSETS.HAZARD], [400, 520, 50, 40, CONFIG.ASSETS.HAZARD], [700, 100, 20, 20, CONFIG.ASSETS.GOAL], [0, 530, 20, 20, CONFIG.ASSETS.START]],
+        // Placeholder Level 9
+        [[0, 560, 800, 40, CONFIG.ASSETS.PLATFORM], [100, 450, 40, 40, CONFIG.ASSETS.PLATFORM], [300, 350, 40, 40, CONFIG.ASSETS.PLATFORM], [700, 100, 20, 20, CONFIG.ASSETS.GOAL], [0, 530, 20, 20, CONFIG.ASSETS.START]],
+        // Placeholder Level 10
+        [[0, 560, 800, 40, CONFIG.ASSETS.PLATFORM], [100, 400, 600, 20, CONFIG.ASSETS.HAZARD], [700, 100, 20, 20, CONFIG.ASSETS.GOAL], [0, 530, 20, 20, CONFIG.ASSETS.START]],
+    ];
+    
+    // --- UTILITY FUNCTIONS (MINIMAL IMPLEMENTATIONS ADDED TO PREVENT ERRORS) ---
+
+    function drawRect(x, y, w, h, color) {
+        ctx.fillStyle = color;
+        ctx.fillRect(x, y, w, h);
+    }
+
+    function drawText(text, x, y, size, color, align = 'left', glowColor = 'transparent', glowBlur = 0) {
+        ctx.save();
+        ctx.shadowColor = glowColor;
+        ctx.shadowBlur = glowBlur;
+        ctx.font = `${size}px 'Courier New', Courier, monospace`;
+        ctx.fillStyle = color;
+        ctx.textAlign = align;
+        ctx.fillText(text, x, y);
+        ctx.restore();
+    }
+
+    function resetLevel() {
+        const currentLevel = levels[currentLevelIndex];
+        let startBlock = currentLevel.find(block => block[4] === CONFIG.ASSETS.START);
+        if (startBlock) {
+            player.x = startBlock[0];
+            player.y = startBlock[1];
+        } else {
+            player.x = 50;
+            player.y = 500;
+        }
+        player.vx = 0;
+        player.vy = 0;
+        player.isDashing = false;
+        player.isAntiGravity = false;
+    }
+
+    function nextLevel() {
+        if (currentLevelIndex < levels.length - 1) {
+            currentLevelIndex++;
+        }
+        player.sessionDeaths = 0;
+        resetLevel();
+        gameState = 'PLAYING';
+    }
+
+    // --- DRAWING FUNCTIONS (UPDATED/NEW) ---
+    
+    function drawLevel(level) {
+        level.forEach(block => {
+            const [x, y, w, h, type] = block;
+            let color = CONFIG.colors.platform;
+            let glow = CONFIG.colors.platform;
+            let drawGlow = 5;
+
+            switch (type) {
+                case CONFIG.ASSETS.START: color = CONFIG.colors.player; glow = CONFIG.colors.player; break;
+                case CONFIG.ASSETS.GOAL: color = CONFIG.colors.goal; glow = CONFIG.colors.goal; break;
+                case CONFIG.ASSETS.HAZARD: color = CONFIG.colors.hazard; glow = CONFIG.colors.hazard; drawGlow = 10; break;
+                case CONFIG.ASSETS.DASH_BOOST: color = CONFIG.colors.dashBoost; glow = CONFIG.colors.dashBoost; break;
+                case CONFIG.ASSETS.ANTI_GRAVITY_SPHERE: color = CONFIG.colors.antiGravity; glow = CONFIG.colors.antiGravity; break;
+                case CONFIG.ASSETS.TIMED_BLOCK_ON: 
+                case CONFIG.ASSETS.TIMED_BLOCK_OFF: 
+                    color = CONFIG.colors.timedBlock; glow = CONFIG.colors.timedBlock;
+                    break;
+                case CONFIG.ASSETS.WARP_GATE_A:
+                case CONFIG.ASSETS.WARP_GATE_B:
+                    color = CONFIG.colors.warpGate; glow = CONFIG.colors.warpGate;
+                    break;
+                case CONFIG.ASSETS.TOXIC_POOL_SURFACE:
+                    color = CONFIG.colors.toxicPool; glow = CONFIG.colors.toxicPool; drawGlow = 15;
+                    break;
+                default: color = CONFIG.colors.platform; glow = CONFIG.colors.platform; break;
+            }
+            
+            ctx.save();
+            ctx.shadowColor = glow;
+            ctx.shadowBlur = drawGlow;
+            drawRect(x, y, w, h, color);
+            ctx.restore();
+        });
+    }
+
+    function drawPlayer(p) {
+        let color = p.isAntiGravity ? CONFIG.colors.antiGravity : CONFIG.colors.player;
+        let glow = p.isAntiGravity ? CONFIG.colors.antiGravity : CONFIG.colors.player;
+        let glowBlur = p.isDashing ? 25 : 10;
+        
+        ctx.save();
+        ctx.shadowColor = glow;
+        ctx.shadowBlur = glowBlur;
+        drawRect(p.x, p.y, p.w, p.h, color);
+        ctx.restore();
+    }
+    
+    function drawPlaying() {
+        ctx.fillStyle = CONFIG.colors.background;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        drawLevel(levels[currentLevelIndex]);
+        drawPlayer(player);
+        
+        document.getElementById('death-counter').innerText = `TOTAL DEATHS: ${player.deaths}`;
+
+        drawText(`LEVEL ${currentLevelIndex + 1}`, 400, 50, 24, CONFIG.colors.platform, 'center');
+    }
+
+    function drawMainMenu() {
+        ctx.fillStyle = CONFIG.colors.background;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        drawText("NEON PULSE", 400, 150, 60, CONFIG.colors.player, 'center', CONFIG.colors.player, 50);
+
+        const options = CONFIG.menu.MAIN_OPTIONS;
+        const baseY = 280;
+        const spacing = 50;
+
+        options.forEach((option, index) => {
+            let color = index === CONFIG.menu.currentSelection ? CONFIG.colors.goal : CONFIG.colors.platform;
+            let glow = index === CONFIG.menu.currentSelection ? CONFIG.colors.goal : 'transparent';
+            drawText(option, 400, baseY + index * spacing, 24, color, 'center', glow, 20);
+        });
+
+        drawText("PRESS SPACE TO SELECT", 400, 550, 14, CONFIG.colors.platform, 'center');
+    }
+
+    function drawLevelSelect() {
+        ctx.fillStyle = CONFIG.colors.background;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        drawText("LEVEL SELECT (1-10) - PRESS [Q] TO RETURN", 400, 100, 24, CONFIG.colors.player, 'center');
+    }
+    
+    // NEW: Draw Level Editor Interface
+    function drawLevelEditor() {
+        ctx.fillStyle = CONFIG.colors.background;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        drawText("LEVEL EDITOR v1.0", 400, 50, 40, CONFIG.colors.player, 'center', CONFIG.colors.player, 30);
+        drawText("Select Asset [1-5], Place [Space], Test [T], Save [S], Exit [Q]", 400, 80, 14, CONFIG.colors.platform, 'center');
+
+        // Draw grid
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+        for (let x = 0; x < canvas.width; x += TILE_SIZE) {
+            ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+        }
+        for (let y = 0; y < canvas.height; y += TILE_SIZE) {
+            ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+        }
+
+        // Draw the asset palette (toolbar)
+        const assetOptions = ["P - Platform", "H - Hazard", "1 - Dash Boost", "2 - Anti-Gravity", "3 - Timed Block", "4 - Warp Gate", "5 - Toxic Pool"];
+        ctx.fillStyle = 'rgba(50, 50, 50, 0.8)';
+        ctx.fillRect(0, 0, 800, 30);
+        assetOptions.forEach((asset, i) => {
+            drawText(asset, 50 + i * 110, 20, 12, CONFIG.colors.platform);
+        });
+    }
+    
+    function drawControls() {
+        ctx.fillStyle = CONFIG.colors.background;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        drawText("CONTROLS - PRESS [Q] TO RETURN", 400, 100, 24, CONFIG.colors.player, 'center');
+    }
+
+    function drawGoalScreen() {
+        ctx.fillStyle = CONFIG.colors.background;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        drawText("LEVEL CLEARED - PRESS [R] TO CONTINUE", 400, 300, 30, CONFIG.colors.goal, 'center', CONFIG.colors.goal, 30);
+    }
+
+    // --- INPUT HANDLERS (UPDATED) ---
+    
+    function handleLevelSelectInput(key) { 
+        if (key === 'q') player.menuState = 'MAIN';
+    }
+
+    function handleGoalInput(key) { 
+        if (key === 'r') nextLevel();
+    }
+    
+    function handleOptionsInput(key) {
+        if (key === 'q') player.menuState = 'MAIN';
+    }
+
+    // Updated: handleMenuInput to include "LEVEL EDITOR" logic
+    function handleMenuInput(key) {
+        const numOptions = CONFIG.menu.MAIN_OPTIONS.length;
+        if (key === 'ArrowUp') {
+            CONFIG.menu.currentSelection = (CONFIG.menu.currentSelection - 1 + numOptions) % numOptions;
+        } else if (key === 'ArrowDown') {
+            CONFIG.menu.currentSelection = (CONFIG.menu.currentSelection + 1) % numOptions;
+        } else if (key === ' ') {
+            const selectedOption = CONFIG.menu.MAIN_OPTIONS[CONFIG.menu.currentSelection];
+            if (selectedOption === "PLAY GAME") {
+                player.menuState = 'LEVEL_SELECT';
+                CONFIG.menu.currentSelection = 0;
+            } else if (selectedOption === "LEVEL EDITOR") {
+                player.menuState = 'LEVEL_EDITOR';
+            } else if (selectedOption === "OPTIONS") {
+                player.menuState = 'OPTIONS';
+                CONFIG.menu.currentSelection = 0;
+            } else if (selectedOption === "EXIT") {
+                alert("Game Exited (in browser environment)");
+            }
+        }
+    }
+
+    // NEW: Input handler for Level Editor
+    function handleEditorInput(key) {
+        if (key === 'q') {
+            // Return to Main Menu
+            player.menuState = 'MAIN';
+            CONFIG.menu.currentSelection = 1; // Select 'Level Editor' option upon return
+        } else if (key === 't') {
+            // Placeholder for Test Level logic
+            drawText("TESTING MODE ACTIVATED (Not implemented)", 400, 300, 30, CONFIG.colors.goal, 'center');
+        } else if (key === 's') {
+            // Placeholder for Save Level logic
+            drawText("LEVEL SAVED (Not implemented)", 400, 450, 20, CONFIG.colors.goal, 'center');
+        } 
+        // Logic for placing assets (1, 2, 3, 4, 5, p, h) would go here
+    }
+
+
+    // --- GAME LOGIC (SIMPLIFIED) ---
+
+    function updatePlayer(dt) {
+        // Simplified Player Assist Logic
+        if (player.teleportCooldown > 0) player.teleportCooldown -= dt;
+
+        if (player.isAntiGravity) {
+            player.antiGravityTimer -= dt;
+            if (player.antiGravityTimer <= 0) player.isAntiGravity = false;
+            player.vy += -CONFIG.physics.gravity * 0.5; // Reversed gravity
+        } else {
+            player.vy += CONFIG.physics.gravity; // Normal gravity
+        }
+        
+        player.vy = player.isAntiGravity 
+            ? Math.max(-CONFIG.physics.maxFallSpeed, player.vy) 
+            : Math.min(CONFIG.physics.maxFallSpeed, player.vy);
+
+        if (player.isDashing) {
+            player.dashTimer -= dt;
+            if (player.dashTimer <= 0) {
+                player.isDashing = false;
+                player.vx *= 0.5;
+            }
+        }
+        
+        // Standard Physics
+        player.vx *= CONFIG.physics.friction;
+        player.x += player.vx;
+        player.y += player.vy;
+        
+        // Boundary Check
+        if (player.y + player.h > canvas.height) { 
+            player.deaths++;
+            player.sessionDeaths++;
+            resetLevel();
+        }
+    }
+
+    function checkCollisions(player, level) {
+        // Collision logic is simplified, but structure is ready for new assets
+    }
+
+    // --- GAME LOOP AND STATE ---
+
+    function draw() {
+        if (gameState === 'MENU') {
+            if (player.menuState === 'MAIN') {
+                drawMainMenu();
+            } else if (player.menuState === 'LEVEL_SELECT') {
+                drawLevelSelect();
+            } else if (player.menuState === 'LEVEL_EDITOR') { 
+                drawLevelEditor(); // NEW
+            } else if (player.menuState === 'CONTROLS') {
+                drawControls();
+            } else if (player.menuState === 'OPTIONS') {
+                // drawOptions();
+            }
+        } else if (gameState === 'PLAYING') {
+            drawPlaying();
+        } else if (gameState === 'GOAL') {
+            drawGoalScreen();
+        }
+        requestAnimationFrame(draw);
+    }
+
+    function handleInput(key) {
+        if (gameState === 'PLAYING') {
+            // Movement logic goes here
+        } else if (gameState === 'MENU') {
+            if (player.menuState === 'MAIN') {
+                handleMenuInput(key);
+            } else if (player.menuState === 'LEVEL_SELECT') {
+                handleLevelSelectInput(key);
+            } else if (player.menuState === 'LEVEL_EDITOR') { 
+                handleEditorInput(key); // NEW
+            } else if (player.menuState === 'OPTIONS') {
+                handleOptionsInput(key);
+            } else if (player.menuState === 'CONTROLS') {
+                if (key === 'q') player.menuState = 'MAIN';
+            }
+        } else if (gameState === 'GOAL') {
+            handleGoalInput(key);
+        }
+    }
+
+
+    document.addEventListener('keydown', (e) => {
+        handleInput(e.key.toLowerCase());
+    });
+    
+    // Start the game loop
+    let lastTime = 0;
+    function loop(time) {
+        if (!lastTime) lastTime = time;
+        const dt = (time - lastTime) / 1000;
+        lastTime = time;
+
+        if (gameState === 'PLAYING') {
+            updatePlayer(dt);
+            checkCollisions(player, levels[currentLevelIndex]);
+        }
+        
+        requestAnimationFrame(loop);
+    }
+
+    // Initialization
+    resetLevel(); 
+    loop(0); 
+    draw();  
+
+</script>
+</body>
+</html>
