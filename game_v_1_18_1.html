@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Neon Pulse: Overdrive</title>
+    <style>
+        body { margin: 0; background-color: #020205; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; font-family: 'Courier New', monospace; }
+        canvas { box-shadow: 0 0 100px rgba(0, 255, 255, 0.15); border: 1px solid #1a1a2e; cursor: crosshair; }
+        #ui { position: absolute; top: 20px; color: #00ffff; text-shadow: 0 0 10px #00ffff; text-align: center; width: 800px; pointer-events: none; text-transform: uppercase; letter-spacing: 4px; }
+    </style>
+</head>
+<body>
+<div id="ui">
+    <div id="death-counter">REBOOTS: 0</div>
+    <div id="status-msg" style="font-size: 10px; margin-top: 5px; opacity: 0.6;">SYSTEM: STABLE</div>
+</div>
+<canvas id="gameCanvas" width="800" height="600"></canvas>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const TILE_SIZE = 40;
+
+    const CONFIG = {
+        physics: { gravity: 0.6, friction: 0.8, jump: -11, speed: 0.8, maxSpeed: 6 },
+        colors: { 
+            player: '#00ffff', 
+            platform: '#ff00ff', // Cyber Pink
+            goal: '#39ff14',     // Neon Green
+            hazard: '#ff073a',   // Neon Red
+            bg: '#020205',
+            grid: 'rgba(255, 0, 255, 0.05)'
+        },
+        menuOptions: ["INITIALIZE", "EDITOR PROTOCOL", "OPTIONS"],
+        assets: { PLATFORM: 2, GOAL: 3, HAZARD: 4 }
+    };
+
+    let gameState = 'MENU';
+    let currentLevelIndex = 0;
+    let selectedEditorAsset = CONFIG.assets.PLATFORM;
+    let cameraShake = 0;
+    let frameCount = 0;
+    
+    // Ghost/Trail System
+    let playerTrail = [];
+
+    let player = { 
+        x: 100, y: 500, w: 18, h: 18, vx: 0, vy: 0, 
+        menuState: 'MAIN', menuSelection: 0, deaths: 0, 
+        onGround: false 
+    };
+
+    let levels = [
+        [[0, 560, 800, 40, 2], [300, 450, 200, 20, 2], [700, 400, 40, 40, 3]], // Level 1
+        [[0, 560, 200, 40, 2], [300, 500, 200, 40, 2], [600, 440, 200, 40, 2], [740, 380, 40, 40, 3]] // Level 2
+    ];
+
+    const keys = {};
+    window.addEventListener('keydown', e => {
+        keys[e.key] = true;
+        if (gameState === 'MENU') {
+            if (e.key === 'ArrowUp') player.menuSelection = (player.menuSelection - 1 + CONFIG.menuOptions.length) % CONFIG.menuOptions.length;
+            if (e.key === 'ArrowDown') player.menuSelection = (player.menuSelection + 1) % CONFIG.menuOptions.length;
+            if (e.key === ' ') {
+                if (player.menuSelection === 0) { gameState = 'PLAYING'; resetLevel(); }
+                else if (player.menuSelection === 1) player.menuState = 'LEVEL_EDITOR';
+            }
+        }
+        if (e.key === 'q' && player.menuState === 'LEVEL_EDITOR') player.menuState = 'MAIN';
+        if (e.key === 'Escape') gameState = 'MENU';
+    });
+    window.addEventListener('keyup', e => keys[e.key] = false);
+
+    canvas.addEventListener('mousedown', e => {
+        if (gameState === 'MENU' && player.menuState === 'LEVEL_EDITOR') {
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = Math.floor((e.clientX - rect.left) / TILE_SIZE) * TILE_SIZE;
+            const mouseY = Math.floor((e.clientY - rect.top) / TILE_SIZE) * TILE_SIZE;
+            levels[currentLevelIndex].push([mouseX, mouseY, TILE_SIZE, TILE_SIZE, selectedEditorAsset]);
+            cameraShake = 5; // Little feedback shake
+        }
+    });
+
+    function resetLevel() {
+        player.x = 100; player.y = 500;
+        player.vx = 0; player.vy = 0;
+        playerTrail = [];
+    }
+
+    function update() {
+        if (gameState === 'PLAYING') {
+            // Movement
+            if (keys['ArrowLeft'] || keys['a']) player.vx -= CONFIG.physics.speed;
+            if (keys['ArrowRight'] || keys['d']) player.vx += CONFIG.physics.speed;
+            if ((keys['ArrowUp'] || keys['w'] || keys[' ']) && player.onGround) {
+                player.vy = CONFIG.physics.jump;
+                player.onGround = false;
+                cameraShake = 3;
+            }
+
+            player.vx *= CONFIG.physics.friction;
+            player.vy += CONFIG.physics.gravity;
+            
+            player.x += player.vx;
+            checkCollision(true);
+            player.y += player.vy;
+            checkCollision(false);
+
+            if (player.y > 700) { player.deaths++; cameraShake = 20; resetLevel(); }
+
+            // Update Trail
+            playerTrail.push({x: player.x, y: player.y});
+            if (playerTrail.length > 10) playerTrail.shift();
+
+            if (cameraShake > 0) cameraShake *= 0.9;
+        }
+        frameCount++;
+    }
+
+    function checkCollision(horizontal) {
+        levels[currentLevelIndex].forEach(b => {
+            if (player.x < b[0] + b[2] && player.x + player.w > b[0] &&
+                player.y < b[1] + b[3] && player.y + player.h > b[1]) {
+                
+                if (b[4] === 4) { player.deaths++; resetLevel(); return; }
+                if (b[4] === 3) { currentLevelIndex = (currentLevelIndex + 1) % levels.length; resetLevel(); return; }
+
+                if (horizontal) {
+                    if (player.vx > 0) player.x = b[0] - player.w;
+                    if (player.vx < 0) player.x = b[0] + b[2];
+                    player.vx = 0;
+                } else {
+                    if (player.vy > 0) {
+                        player.y = b[1] - player.h;
+                        player.onGround = true;
+                    }
+                    if (player.vy < 0) player.y = b[1] + b[3];
+                    player.vy = 0;
+                }
+            }
+        });
+    }
+
+    function draw() {
+        update();
+        ctx.fillStyle = CONFIG.colors.bg;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.save();
+        // Camera Shake
+        if (cameraShake > 0.5) {
+            ctx.translate(Math.random() * cameraShake - cameraShake/2, Math.random() * cameraShake - cameraShake/2);
+        }
+
+        if (gameState === 'MENU') {
+            if (player.menuState === 'MAIN') {
+                ctx.shadowBlur = 20; ctx.shadowColor = CONFIG.colors.player;
+                ctx.fillStyle = 'white'; ctx.textAlign = 'center'; ctx.font = 'bold 50px Courier';
+                ctx.fillText("NEON PULSE", 400, 200);
+                
+                ctx.font = '20px Courier';
+                CONFIG.menuOptions.forEach((opt, i) => {
+                    ctx.shadowBlur = i === player.menuSelection ? 15 : 0;
+                    ctx.fillStyle = i === player.menuSelection ? CONFIG.colors.player : '#444';
+                    ctx.fillText(i === player.menuSelection ? `> ${opt} <` : opt, 400, 350 + i * 50);
+                });
+            } else if (player.menuState === 'LEVEL_EDITOR') {
+                // Background Grid
+                ctx.strokeStyle = CONFIG.colors.grid;
+                for(let i=0; i<800; i+=TILE_SIZE) { ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,600); ctx.stroke(); }
+                for(let i=0; i<600; i+=TILE_SIZE) { ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(800,i); ctx.stroke(); }
+                drawLevel(levels[currentLevelIndex]);
+                ctx.fillStyle = CONFIG.colors.player; ctx.textAlign = 'center';
+                ctx.fillText("CONSTRUCTION PROTOCOL: CLICK TO PLACE | Q TO EXIT", 400, 50);
+            }
+        } else if (gameState === 'PLAYING') {
+            // Draw Scenery (Scanning lines)
+            ctx.strokeStyle = 'rgba(0, 255, 255, 0.03)';
+            ctx.lineWidth = 1;
+            for(let i=0; i<600; i+=10) { ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(800, i); ctx.stroke(); }
+
+            // Draw Trail
+            playerTrail.forEach((t, i) => {
+                ctx.fillStyle = `rgba(0, 255, 255, ${i * 0.05})`;
+                ctx.fillRect(t.x, t.y, player.w, player.h);
+            });
+
+            drawLevel(levels[currentLevelIndex]);
+
+            // Draw Player
+            ctx.shadowBlur = 15; ctx.shadowColor = CONFIG.colors.player;
+            ctx.fillStyle = CONFIG.colors.player;
+            ctx.fillRect(player.x, player.y, player.w, player.h);
+            ctx.shadowBlur = 0;
+        }
+        ctx.restore();
+
+        document.getElementById('death-counter').innerText = `REBOOTS: ${player.deaths}`;
+        requestAnimationFrame(draw);
+    }
+
+    function drawLevel(level) {
+        level.forEach(b => {
+            let color = CONFIG.colors.platform;
+            if (b[4] === 3) color = CONFIG.colors.goal;
+            if (b[4] === 4) color = CONFIG.colors.hazard;
+
+            // Bloom for objects
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = color;
+            ctx.fillStyle = color;
+            
+            // Beveled look
+            ctx.fillRect(b[0], b[1], b[2], b[3]);
+            ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+            ctx.strokeRect(b[0], b[1], b[2], b[3]);
+            ctx.shadowBlur = 0;
+        });
+    }
+
+    draw();
+</script>
+</body>
+</html>
