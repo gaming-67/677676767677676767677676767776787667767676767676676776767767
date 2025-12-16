@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Neon Pulse: Overdrive</title>
+    <style>
+        body { margin: 0; background-color: #05050a; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; font-family: 'Courier New', monospace; }
+        canvas { box-shadow: 0 0 100px rgba(255, 0, 255, 0.2); border: 1px solid #1a1a2e; }
+        #ui { position: absolute; top: 20px; color: #00ffff; text-shadow: 0 0 10px #00ffff; text-align: center; width: 800px; pointer-events: none; text-transform: uppercase; letter-spacing: 4px; z-index: 10; }
+    </style>
+</head>
+<body>
+<div id="ui">
+    <div id="death-counter">REBOOTS: 0</div>
+</div>
+<canvas id="gameCanvas" width="800" height="600"></canvas>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    
+    // --- Configuration ---
+    const CONFIG = {
+        colors: {
+            bg: '#05050a',
+            sunTop: '#ff00ff',
+            sunBottom: '#ff8800',
+            grid: '#ff00ff',
+            player: '#00ffff',
+            text: '#ffffff'
+        },
+        menuOptions: ["INITIALIZE", "EDITOR PROTOCOL", "EXIT SYSTEM"]
+    };
+
+    let gameState = 'MENU';
+    let menuSelection = 0;
+    let frame = 0;
+
+    // Particles for the background
+    let particles = [];
+    for(let i=0; i<50; i++) {
+        particles.push({
+            x: Math.random() * 800,
+            y: Math.random() * 600,
+            s: Math.random() * 2,
+            v: Math.random() * 0.5 + 0.2
+        });
+    }
+
+    // --- Input Handling ---
+    window.addEventListener('keydown', e => {
+        if (gameState === 'MENU') {
+            if (e.key === 'ArrowUp') menuSelection = (menuSelection - 1 + CONFIG.menuOptions.length) % CONFIG.menuOptions.length;
+            if (e.key === 'ArrowDown') menuSelection = (menuSelection + 1) % CONFIG.menuOptions.length;
+            if (e.key === ' ') {
+                if (menuSelection === 0) alert("Starting Game...");
+                if (menuSelection === 1) alert("Opening Editor...");
+            }
+        }
+    });
+
+    function drawSun() {
+        const cx = 400, cy = 250, r = 120;
+        let grad = ctx.createLinearGradient(cx, cy - r, cx, cy + r);
+        grad.addColorStop(0, CONFIG.colors.sunTop);
+        grad.addColorStop(1, CONFIG.colors.sunBottom);
+        
+        ctx.save();
+        ctx.shadowBlur = 40;
+        ctx.shadowColor = CONFIG.colors.sunTop;
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Sun horizontal lines
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = CONFIG.colors.bg;
+        for (let i = 0; i < 15; i++) {
+            let h = i * 2;
+            ctx.fillRect(cx - r - 10, cy + (i * 12) - 30, (r * 2) + 20, h);
+        }
+        ctx.restore();
+    }
+
+    function drawScrollingGrid() {
+        ctx.save();
+        ctx.strokeStyle = CONFIG.colors.grid;
+        ctx.lineWidth = 1;
+        ctx.globalAlpha = 0.3;
+        
+        const horizon = 300;
+        const speed = (frame * 2) % 40;
+
+        // Horizontal lines (Perspective)
+        for (let i = 0; i < 20; i++) {
+            let y = horizon + Math.pow(i, 2) + speed;
+            if (y > 600) continue;
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(800, y);
+            ctx.stroke();
+        }
+
+        // Vertical lines (Vanishing point)
+        for (let i = -10; i <= 20; i++) {
+            ctx.beginPath();
+            ctx.moveTo(400, horizon);
+            ctx.lineTo(i * 80 - 200, 600);
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
+
+    function drawParticles() {
+        ctx.fillStyle = "#00ffff";
+        particles.forEach(p => {
+            p.y -= p.v;
+            if (p.y < 0) p.y = 600;
+            ctx.fillRect(p.x, p.y, p.s, p.s);
+        });
+    }
+
+    function drawMenuText() {
+        // Title with Chromatic Aberration
+        ctx.font = "bold 60px 'Courier New'";
+        ctx.textAlign = "center";
+        
+        // Red offset
+        ctx.fillStyle = "rgba(255, 0, 100, 0.7)";
+        ctx.fillText("NEON PULSE", 400 + Math.sin(frame/5)*2, 150);
+        // Blue offset
+        ctx.fillStyle = "rgba(0, 255, 255, 0.7)";
+        ctx.fillText("NEON PULSE", 400 - Math.sin(frame/5)*2, 150);
+        // Main text
+        ctx.fillStyle = "#ffffff";
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = "#ffffff";
+        ctx.fillText("NEON PULSE", 400, 150);
+
+        // Menu Options
+        ctx.font = "20px 'Courier New'";
+        CONFIG.menuOptions.forEach((opt, i) => {
+            const isSelected = i === menuSelection;
+            ctx.shadowBlur = isSelected ? 15 : 0;
+            ctx.shadowColor = CONFIG.colors.player;
+            ctx.fillStyle = isSelected ? CONFIG.colors.player : "#555";
+            
+            let y = 400 + i * 50;
+            let text = isSelected ? `> ${opt} <` : opt;
+            
+            if (isSelected) {
+                // Pulse effect for selection
+                ctx.globalAlpha = 0.7 + Math.sin(frame/10) * 0.3;
+            } else {
+                ctx.globalAlpha = 1;
+            }
+            
+            ctx.fillText(text, 400, y);
+        });
+        ctx.globalAlpha = 1;
+    }
+
+    function loop() {
+        ctx.fillStyle = CONFIG.colors.bg;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        drawParticles();
+        drawSun();
+        drawScrollingGrid();
+        drawMenuText();
+
+        frame++;
+        requestAnimationFrame(loop);
+    }
+
+    loop();
+</script>
+</body>
+</html>
