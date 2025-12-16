@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Neon Pulse: Overdrive Edition</title>
+    <style>
+        body { margin: 0; background-color: #05050a; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; font-family: 'Courier New', monospace; }
+        canvas { box-shadow: 0 0 100px rgba(255, 0, 255, 0.2); border: 1px solid #1a1a2e; }
+        #ui { position: absolute; top: 20px; color: #00ffff; text-shadow: 0 0 10px #00ffff; text-align: center; width: 800px; pointer-events: none; text-transform: uppercase; letter-spacing: 4px; z-index: 10; }
+        #stats-bar { position: absolute; bottom: 20px; width: 800px; display: flex; justify-content: space-between; padding: 0 20px; color: #ff00ff; font-size: 14px; box-sizing: border-box; }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <div id="main-header">NEON PULSE</div>
+    <div id="timer" style="font-size: 18px; margin-top: 10px;"></div>
+</div>
+
+<div id="stats-bar">
+    <div id="death-counter">REBOOTS: 0</div>
+    <div id="level-display">SECTOR: 1/30</div>
+</div>
+
+<canvas id="gameCanvas" width="800" height="600"></canvas>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const TILE_SIZE = 40;
+
+    const CONFIG = {
+        modes: {
+            NORMAL: { gravity: 0.6, jump: -13, doubleJump: true },
+            HARD: { gravity: 0.85, jump: -12, doubleJump: false },
+            SPEEDRUN: { gravity: 0.6, jump: -13, doubleJump: true }
+        },
+        colors: {
+            bg: '#05050a', sun: ['#ff00ff', '#ff8800'], grid: '#ff00ff',
+            player: '#00ffff', platform: '#bc13fe', hazard: '#ff073a', goal: '#ffe808'
+        }
+    };
+
+    let gameState = 'MENU';
+    let currentMode = 'NORMAL';
+    let currentLevel = 0;
+    let menuIdx = 0;
+    let frame = 0;
+    let startTime = 0;
+    let deaths = 0;
+    let playerTrail = [];
+
+    let player = { x: 50, y: 500, vx: 0, vy: 0, w: 20, h: 20, grounded: false, jumps: 0 };
+
+    // --- PROCEDURAL LEVEL GENERATION (30 LEVELS) ---
+    const levels = [];
+    for(let i=0; i<30; i++) {
+        let l = [[0, 560, 1200, 40, 'platform']]; // Ground
+        let difficulty = i * 40;
+        for(let j=0; j<8; j++) {
+            l.push([150 + j*180, 500 - (j*50) - (Math.random()*30), 100, 20, 'platform']);
+            if(i > 5 && j % 3 === 0) l.push([200 + j*180, 540, 40, 20, 'hazard']);
+        }
+        l.push([720, 100, 40, 40, 'goal']);
+        levels.push(l);
+    }
+
+    // --- INPUT HANDLING ---
+    const keys = {};
+    window.onkeydown = e => {
+        keys[e.key] = true;
+        if(gameState === 'MENU') {
+            if(e.key === 'ArrowUp') menuIdx = (menuIdx - 1 + 4) % 4;
+            if(e.key === 'ArrowDown') menuIdx = (menuIdx + 1) % 4;
+            if(e.key === ' ') {
+                const opts = ['NORMAL', 'HARD', 'SPEEDRUN', 'EDITOR'];
+                if(menuIdx < 3) {
+                    currentMode = opts[menuIdx];
+                    startEngine();
+                } else {
+                    gameState = 'EDITOR';
+                }
+            }
+        }
+        if(e.key === 'Escape') gameState = 'MENU';
+    };
+    window.onkeyup = e => keys[e.key] = false;
+
+    function startEngine() {
+        gameState = 'PLAYING';
+        currentLevel = 0;
+        deaths = 0;
+        startTime = Date.now();
+        resetPlayer();
+    }
+
+    function resetPlayer() {
+        player.x = 80; player.y = 500;
+        player.vx = 0; player.vy = 0;
+        playerTrail = [];
+    }
+
+    // --- RENDERERS ---
+    function drawSun() {
+        const grad = ctx.createLinearGradient(400, 100, 400, 350);
+        grad.addColorStop(0, CONFIG.colors.sun[0]);
+        grad.addColorStop(1, CONFIG.colors.sun[1]);
+        ctx.save();
+        ctx.shadowBlur = 50; ctx.shadowColor = CONFIG.colors.sun[0];
+        ctx.fillStyle = grad;
+        ctx.beginPath(); ctx.arc(400, 250, 100, 0, Math.PI*2); ctx.fill();
+        ctx.restore();
+        ctx.fillStyle = CONFIG.colors.bg;
+        for(let i=0; i<10; i++) ctx.fillRect(280, 270 + i*12, 240, i*1.5);
+    }
+
+    function drawGrid() {
+        ctx.strokeStyle = CONFIG.colors.grid; ctx.globalAlpha = 0.15;
+        const speed = (frame * 2) % 40;
+        for(let i=0; i<20; i++) {
+            let y = 300 + Math.pow(i, 2) + speed;
+            ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(800, y); ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+    }
+
+    function draw() {
+        ctx.fillStyle = CONFIG.colors.bg;
+        ctx.fillRect(0, 0, 800, 600);
+
+        if(gameState === 'MENU') {
+            drawSun();
+            drawGrid();
+            ctx.textAlign = 'center'; ctx.fillStyle = 'white';
+            ctx.font = 'bold 50px Courier'; ctx.fillText("NEON PULSE", 400, 150);
+            const opts = ["NORMAL MODE", "HARD MODE", "SPEEDRUN", "LEVEL EDITOR"];
+            opts.forEach((o, i) => {
+                ctx.fillStyle = i === menuIdx ? '#00ffff' : '#444';
+                ctx.font = i === menuIdx ? '24px Courier' : '20px Courier';
+                ctx.fillText(i === menuIdx ? `> ${o} <` : o, 400, 400 + i*40);
+            });
+        } else if(gameState === 'PLAYING') {
+            updatePhysics();
+            
+            // Trail
+            playerTrail.push({x: player.x, y: player.y});
+            if(playerTrail.length > 8) playerTrail.shift();
+            playerTrail.forEach((t, i) => {
+                ctx.fillStyle = `rgba(0, 255, 255, ${i*0.1})`;
+                ctx.fillRect(t.x, t.y, player.w, player.h);
+            });
+
+            // Level
+            levels[currentLevel].forEach(b => {
+                ctx.shadowBlur = 10; ctx.shadowColor = CONFIG.colors[b[4]];
+                ctx.fillStyle = CONFIG.colors[b[4]];
+                ctx.fillRect(b[0], b[1], b[2], b[3]);
+            });
+
+            // Player
+            ctx.shadowBlur = 20; ctx.shadowColor = '#00ffff';
+            ctx.fillStyle = 'white';
+            ctx.fillRect(player.x, player.y, player.w, player.h);
+        }
+
+        frame++;
+        requestAnimationFrame(draw);
+    }
+
+    function updatePhysics() {
+        const settings = CONFIG.modes[currentMode];
+        if(keys['ArrowLeft']) player.vx -= 0.7;
+        if(keys['ArrowRight']) player.vx += 0.7;
+        if(keys[' '] && player.grounded) {
+            player.vy = settings.jump;
+            player.grounded = false;
+        }
+
+        player.vx *= 0.85;
+        player.vy += settings.gravity;
+        player.x += player.vx;
+        player.y += player.vy;
+
+        player.grounded = false;
+        levels[currentLevel].forEach(b => {
+            if(player.x < b[0]+b[2] && player.x+player.w > b[0] && player.y < b[1]+b[3] && player.y+player.h > b[1]) {
+                if(b[4] === 'hazard') { deaths++; resetPlayer(); }
+                if(b[4] === 'goal') { 
+                    currentLevel++; 
+                    if(currentLevel >= 30) gameState = 'MENU';
+                    else resetPlayer(); 
+                }
+                if(b[4] === 'platform' && player.vy > 0) {
+                    player.y = b[1] - player.h;
+                    player.vy = 0;
+                    player.grounded = true;
+                }
+            }
+        });
+
+        if(player.y > 600) { deaths++; resetPlayer(); }
+        
+        document.getElementById('death-counter').innerText = `REBOOTS: ${deaths}`;
+        document.getElementById('level-display').innerText = `SECTOR: ${currentLevel + 1}/30`;
+        if(currentMode === 'SPEEDRUN') {
+            document.getElementById('timer').innerText = ((Date.now() - startTime)/1000).toFixed(2) + "s";
+        }
+    }
+
+    draw();
+</script>
+</body>
+</html>
